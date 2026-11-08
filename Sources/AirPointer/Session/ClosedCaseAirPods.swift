@@ -13,7 +13,8 @@ struct ClosedCaseAirPods:Equatable {
     var productID:UInt16=0
     var title:String{name.localizedCaseInsensitiveContains(model) ? name:"\(name) · \(model)"}
     // Tested with AirPods Pro 3. AirPods Pro 2 share the case the pointer talks to.
-    static let models=["0x2014":"AirPods Pro 2","0x2024":"AirPods Pro 2","0x2027":"AirPods Pro 3"]
+    static let models=["0x200e":"AirPods Pro 1","0x2014":"AirPods Pro 2","0x2024":"AirPods Pro 2","0x2027":"AirPods Pro 3"]
+    var usesHeadphoneMotion:Bool{productID==0x200E}
     static let targetURL=airPointerDataFolder.appendingPathComponent("closed-case-target.txt")
 
     enum Choice:Equatable {
@@ -143,6 +144,9 @@ struct ClosedCaseAirPods:Equatable {
         case 51:return stopping ? nil:"AirPointer stopped reading motion, so the AirPods connection closed. Connect again from the Pointer page."
         case 52:return stopping ? nil:"The AirPods connection closed when AirPointer was stopped. Connect again from the Pointer page."
         case 53:return "AirPointer had to force the AirPods connection closed. If the pointer or your AirPods act oddly, turn Bluetooth off and on, then connect again."
+        case 54:return "AirPointer needs Motion & Fitness access. Allow it in System Settings → Privacy & Security → Motion & Fitness, then connect again."
+        case 55:return "No motion came from your AirPods Pro 1. Turn off Automatic Ear Detection in AirPods settings, briefly lift one AirPod out of the open case and put it back, then connect again."
+        case 56:return "Disconnect other headphones from this Mac before using AirPods Pro 1, then connect again."
         default:return stopping ? nil:"The AirPods connection ended unexpectedly. Connect again, then open the lid."
         }
     }
