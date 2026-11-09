@@ -29,8 +29,9 @@
 | Item | Status |
 |---|---|
 | AirPods Pro 3, macOS 26, Apple Silicon | Tested on one Mac with one pair |
+| macOS 27 | Builds with no warnings and passes the offline checks; not tested with AirPods |
 | AirPods 4 with ANC | Tested on one Mac with one pair |
-| AirPods Pro 2 | Recognized, not tested |
+| AirPods Pro 2 (Lightning and USB-C) | Recognized, not tested |
 | AirPods 4 | Recognized, not tested |
 | AirPods paired with your Mac | Required |
 | Xcode | Required to build |
@@ -90,6 +91,19 @@ different shortcut, go to Settings.
 Drag lock, back tap and twist to scroll each have a switch in Settings. While drag
 lock is on, a double-click waits about 0.4 seconds for a third tap, so it does not
 open a file or zoom a window before you can drag it.
+
+### Present slides
+
+When Keynote or PowerPoint is playing a slideshow in front, taps change slides
+instead of clicking:
+
+| Tap | Slide |
+|---|---|
+| Once | Next. It changes after 0.4 s, in case a second tap follows. |
+| Twice quickly | Previous |
+
+The cursor keeps moving over the slides, so you can still point at them. There is
+nothing to turn on. In any other window, a tap clicks.
 
 <p align="center">
   <img src="Assets/Readme/screens.png" width="100%" alt="The AirPointer window, the menu bar panel, and the notch while pointing">

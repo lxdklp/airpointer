@@ -60,7 +60,7 @@ final class TapClickSound {
     // A running engine starts a sound at once, where AVAudioPlayer holds its caller about 30 ms every time. Its queue keeps
     // Core Audio off the pointer's main run loop. It only ever uses the output: touching its input would open a microphone.
     private let engine=AVAudioEngine(),node=AVAudioPlayerNode(),queue=DispatchQueue(label:"airpointer.click-sound",qos:.userInteractive)
-    private let buffer:AVAudioPCMBuffer?
+    private var buffer:AVAudioPCMBuffer?
     var loaded:Bool{buffer != nil}
     private init(){
         buffer=Bundle.main.url(forResource:"TapClick",withExtension:"wav").flatMap{url in
@@ -69,12 +69,18 @@ final class TapClickSound {
                   (try? file.read(into:buffer)) != nil else{return nil}
             return buffer
         }
-        if let buffer{engine.attach(node);engine.connect(node,to:engine.mainMixerNode,format:buffer.format)}
+        if let buffer{
+            engine.attach(node)
+            // macOS 27 replaced the silent connect with one that reports failure; without a link there is no click.
+            if #available(macOS 27,*){if (try? engine.connectNode(node,to:engine.mainMixerNode,format:buffer.format)) == nil{engine.detach(node);self.buffer=nil}}
+            else{engine.connect(node,to:engine.mainMixerNode,format:buffer.format)}
+        }
     }
     // A change of output stops the engine, so anything that needs it brings it back.
     private func run(){
         guard buffer != nil,!engine.isRunning else{return}
-        if (try? engine.start()) != nil{node.play()}
+        guard (try? engine.start()) != nil else{return}
+        if #available(macOS 27,*){try? node.playAudio()}else{node.play()}
     }
     func start(){queue.async{self.run()}}
     func stop(){queue.async{self.node.stop();self.engine.stop()}}
@@ -289,6 +295,7 @@ func runClosedCaseNativeChecks() throws {
     guard closedCaseLidOpen(frame(0x24,0x11),productID:0x2027)==true,closedCaseLidOpen(frame(0x62,0x32),productID:0x2027)==true,
           closedCaseLidOpen(frame(0x24,0x19),productID:0x2027)==false,closedCaseLidOpen(frame(0x02,0x11),productID:0x2027)==nil,
           closedCaseLidOpen(frame(0x24,0x11,model:[0x14,0x20]),productID:0x2027)==nil,closedCaseLidOpen(frame(0x24,0x11,model:[0x14,0x20]),productID:0x2014)==true,
+          closedCaseLidOpen(frame(0x24,0x19,model:[0x24,0x20]),productID:0x2024)==false,closedCaseLidOpen(frame(0x24,0x11,model:[0x24,0x20]),productID:0x2014)==nil,
           closedCaseLidOpen(frame(0x24,0x11,model:[0x19,0x20]),productID:0x2019)==true,closedCaseLidOpen(frame(0x24,0x19,model:[0x19,0x20]),productID:0x2019)==false,
           closedCaseLidOpen(frame(0x24,0x11,model:[0x1B,0x20]),productID:0x201B)==true,closedCaseLidOpen(frame(0x24,0x11,model:[0x1B,0x20]),productID:0x2019)==nil,
           closedCaseLidOpen(frame(0x24,0x11,length:27),productID:0x2027)==nil else{
@@ -548,6 +555,8 @@ final class ClosedCaseSession: NSObject {
     private var lastAcceptedTap:(t:Double,back:Bool)?,heldByBack=false
     private static let echoGap=0.35
     private var twistScroll=ClosedCaseTwistScroll(),scrollHold:CGPoint?,scrollCarry=0.0,lastScrollTick=0.0
+    // In a slideshow a front tap waits briefly for a second one (SlideControl.swift).
+    private var slideGate=SlideTapGate()
     private var closedAt=0.0,startedAt=0.0,helperStartedAt=0.0,stoppedAt=0.0,busyRetries=0
     private var activity:NSObjectProtocol?
     private var savedMeasure=0,lastCalibrationSave=0.0
@@ -622,7 +631,7 @@ final class ClosedCaseSession: NSObject {
     func recenter(){if calibrated && inputReady{let resume=enabled;setPose();if resume{toggleCursor()}}else{changed()}}
     func recalibrate(){pause();hasPointed=false;calibrated=false;motion?.resetGrip();changed()}
     // Every way the pointer stops comes through here, so a held drag is always let go.
-    func pause(_ reason:String="Paused"){releaseDrag();for event in twistScroll.reset(){noteScroll(event,at:0)};pauseReason=reason;enabled=false;resumeAfterDrop=false;changed()}
+    func pause(_ reason:String="Paused"){releaseDrag();for event in twistScroll.reset(){noteScroll(event,at:0)};pauseReason=reason;enabled=false;resumeAfterDrop=false;slideGate.cancel();changed()}
     func disconnect(then done:(()->Void)?=nil){
         if let done{if isActive{afterEnd.append(done)}else{done();return}}
         userEnded=true;stop()
@@ -859,6 +868,8 @@ final class ClosedCaseSession: NSObject {
             }
             for note in tapDetector.ignored{try? log?.write(contentsOf:Data("tap: \(note)\n".utf8));tapTest?(.rejected(note))}
             tapDetector.ignored=[]
+            // A lone slideshow tap whose wait for a second one is over moves to the next slide.
+            if let key=slideGate.poll(at:ProcessInfo.processInfo.systemUptime),enabled{postSlide(key)}
             // Ahead of the orientation code, which can take tens of milliseconds now and then.
             // Releases first, then taps in the order they began; each detector lets go only of its own hold.
             func began(_ event:ClosedCaseTapDetector.Event)->Double{if case .tap(let since,_,_)=event{return since};return -.infinity}
@@ -872,7 +883,11 @@ final class ClosedCaseSession: NSObject {
                     }
                     lastAcceptedTap=(since,back)
                     let at=recentPoints.last{$0.t<since}?.point ?? smooth;tapHold=at;heldByBack=back
-                    if enabled{
+                    if enabled,tapTest==nil,!back,SlideShow.frontmostIsShowing(){
+                        if let key=slideGate.tap(at:ProcessInfo.processInfo.systemUptime){postSlide(key)}
+                        if clickSound{TapClickSound.shared.play()}
+                        try? log?.write(contentsOf:Data(String(format:"tap: slideshow tap at %.2f, jolt %.2f g%@\n",since,jolt,repeated ? ", repeat":"").utf8))
+                    }else if enabled{
                         let decided=ProcessInfo.processInfo.systemUptime
                         if let tapTest{tapTest(.click)}else if back{rightClick(at)}else{handleTap(at)}
                         let clicked=ProcessInfo.processInfo.systemUptime
@@ -970,6 +985,11 @@ final class ClosedCaseSession: NSObject {
         guard let bounds=pointerBounds(),
               let event=CGEvent(mouseEventSource:nil,mouseType:dragLock.dragging ? .leftMouseDragged:.mouseMoved,mouseCursorPosition:screenPoint(smooth,bounds:bounds),mouseButton:.left) else{pause();return}
         event.post(tap:.cghidEventTap)
+    }
+    private func postSlide(_ key:SlideKey){
+        guard AXIsProcessTrusted() else{pause();return}
+        SlideShow.post(key)
+        try? log?.write(contentsOf:Data("tap: \(key == .next ? "next":"previous") slide\n".utf8))
     }
     private func handleTap(_ point:CGPoint){
         guard let bounds=pointerBounds() else{pause();return}

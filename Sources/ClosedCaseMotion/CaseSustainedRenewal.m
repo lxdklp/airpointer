@@ -399,7 +399,10 @@ static RootVersionAction steadyRootVersionAction(BOOL versionValid,BOOL pending,
 // renamed pair still matches. Compare tolerantly: trim, ignore case, and accept
 // later model suffixes such as "AirPods Pro 3", while still telling the earbud
 // and the case apart. The app only targets product IDs it knows, so this broader
-// earbud match can't select an unsupported pair by name on its own.
+// earbud match can't select an unsupported pair by name on its own. Newer cases
+// (AirPods Pro 2 with USB-C) report a 29-byte name that does not start with
+// "AirPods", taken to be "MagSafe Charging Case (USB-C)", so a MagSafe charging
+// case is accepted too.
 static NSString *foldedModelName(NSString *name) {
     NSMutableCharacterSet *trim=NSMutableCharacterSet.whitespaceAndNewlineCharacterSet;[trim formUnionWithCharacterSet:NSCharacterSet.controlCharacterSet];
     return [[name stringByTrimmingCharactersInSet:trim] lowercaseString];
@@ -1095,6 +1098,8 @@ static void hardeningChecks(void) {
     check(chargingCaseModelMatches(@"Charging Case") && chargingCaseModelMatches(@"AirPods Pro Case") && chargingCaseModelMatches(@" airpods pro case\n"),@"case match accepts the AirPods 4 case ModelName forms");
     check(chargingCaseModelMatches(@"Wireless Charging Case") && chargingCaseModelMatches(@"AirPods Wireless Charging Case") && chargingCaseModelMatches(@" wireless charging case\n") && chargingCaseModelMatches(@"MagSafe Charging Case"),@"case match accepts the AirPods 4 ANC Wireless Charging Case and MagSafe Charging Case ModelNames");
     check(!chargingCaseModelMatches(@"AirPods Pro") && !chargingCaseModelMatches(@"AirPods") && !chargingCaseModelMatches(@"Charging") && !chargingCaseModelMatches(nil),@"case match rejects the earbud name and non-case names");
+    check(chargingCaseModelMatches(@"MagSafe Charging Case (USB-C)") && earbudModelMatches(@"AirPods Pro 2"),@"AirPods Pro 2 USB-C earbud and MagSafe case ModelNames are accepted");
+    check(!chargingCaseModelMatches(@"MagSafe Charger") && !earbudModelMatches(@"MagSafe Charging Case (USB-C)"),@"MagSafe charger and the MagSafe case are not taken for the case or the earbud");
     CaseSnapshot *root=CaseSnapshot.new;root.targetBound=YES;root.rootModelSent=YES;
     [root handleMessage:uarpMessage(4,1,testModel(@"AirPods Pro 3"))];
     check(root.rootVerified && !root.error,@"root identity accepts a later AirPods Pro ModelName");
