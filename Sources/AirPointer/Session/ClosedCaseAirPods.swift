@@ -12,8 +12,9 @@ struct ClosedCaseAirPods:Equatable {
     // Apple's product ID, which the lid broadcast also carries.
     var productID:UInt16=0
     var title:String{name.localizedCaseInsensitiveContains(model) ? name:"\(name) · \(model)"}
-    // Tested with AirPods Pro 3. AirPods Pro 2 share the case the pointer talks to.
-    static let models=["0x200e":"AirPods Pro 1","0x2014":"AirPods Pro 2","0x2024":"AirPods Pro 2","0x2027":"AirPods Pro 3"]
+    // 产品 ID 使用小写, 与 parse() 中的标准化结果一致.
+    static let models=["0x200e":"AirPods Pro 1","0x2014":"AirPods Pro 2","0x2024":"AirPods Pro 2","0x2027":"AirPods Pro 3",
+                       "0x2019":"AirPods 4","0x201b":"AirPods 4 ANC"]
     var usesHeadphoneMotion:Bool{productID==0x200E}
     static let targetURL=airPointerDataFolder.appendingPathComponent("closed-case-target.txt")
 
@@ -22,8 +23,8 @@ struct ClosedCaseAirPods:Equatable {
         var failure:String? {
             switch self {
             case .chosen:return nil
-            case .missing:return "No AirPods Pro are paired with this Mac. Pair them in System Settings → Bluetooth, then connect again."
-            case .several:return "More than one pair of AirPods Pro is paired with this Mac. Choose yours in Settings, then connect again."
+            case .missing:return "No AirPods Pro or AirPods 4 are paired with this Mac. Pair them in System Settings → Bluetooth, then connect again."
+            case .several:return "More than one pair of AirPods Pro or AirPods 4 is paired with this Mac. Choose yours in Settings, then connect again."
             case .bluetoothOff:return "Bluetooth is off. Turn it on in Control Center, then connect again."
             case .unreadable:return "AirPointer couldn’t read this Mac’s Bluetooth devices. Connect again."
             }
@@ -130,7 +131,7 @@ struct ClosedCaseAirPods:Equatable {
         // Also what AirPods connected to an iPhone at the same time do: they answer the setup, then send nothing.
         case 30:return "No motion came from your AirPods. If they’re also connected to your iPhone, turn off Bluetooth there. Keep both AirPods in the open case, then connect again."
         case 31:return "Your AirPods didn’t say what model they are. "+reopen
-        case 32:return "These earbuds don’t report as AirPods Pro. The closed-case pointer needs AirPods Pro."
+        case 32:return "These earbuds don’t report as AirPods Pro or AirPods 4. The closed-case pointer needs one of those."
         case 34:return "The case didn’t report as an AirPods charging case. Use the case that came with these AirPods, then connect again."
         case 35:return "The charging case stopped responding. Connect again, then open the lid."
         case 36:return "The charging case turned down AirPointer’s request. Open the lid, wait a few seconds, then connect again."

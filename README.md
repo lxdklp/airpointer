@@ -29,7 +29,10 @@
 | Item | Status |
 |---|---|
 | AirPods Pro 3, macOS 26, Apple Silicon | Tested on one Mac with one pair |
-| AirPods Pro 2 | Recognized, not tested |
+| macOS 27 | Builds with no warnings and passes the offline checks; not tested with AirPods |
+| AirPods 4 with ANC | Tested on one Mac with one pair |
+| AirPods Pro 2 (Lightning and USB-C) | Recognized, not tested |
+| AirPods 4 | Recognized, not tested |
 | AirPods Pro 1 | Experimental, Tested on one Mac with one pair |
 | AirPods paired with your Mac | Required |
 | Xcode | Required to build |
@@ -77,6 +80,31 @@ The first time you open the app, setup has four steps.
 
 Press **fn ⌃** in any app to connect. Press it again to pause or resume. To use a
 different shortcut, go to Settings.
+
+| To | Do this |
+|---|---|
+| Click | Tap the front of the case. |
+| Double-click | Tap the front twice. |
+| Right-click | Tap the back of the case. |
+| Drag | Tap the front three times to pick up, move the case, then tap once to drop. |
+| Scroll | Turn the case like a key. Turn further to scroll faster. Turn back to stop. |
+
+Drag lock, back tap and twist to scroll each have a switch in Settings. While drag
+lock is on, a double-click waits about 0.4 seconds for a third tap, so it does not
+open a file or zoom a window before you can drag it.
+
+### Present slides
+
+When Keynote or PowerPoint is playing a slideshow in front, taps change slides
+instead of clicking:
+
+| Tap | Slide |
+|---|---|
+| Once | Next. It changes after 0.4 s, in case a second tap follows. |
+| Twice quickly | Previous |
+
+The cursor keeps moving over the slides, so you can still point at them. There is
+nothing to turn on. In any other window, a tap clicks.
 
 <p align="center">
   <img src="Assets/Readme/screens.png" width="100%" alt="The AirPointer window, the menu bar panel, and the notch while pointing">
@@ -137,6 +165,9 @@ confirmed it yet.
 | The pointer stutters just after you connect | This is normal for about 20 seconds. |
 | "Set it down" takes a long time | Use a firm, flat surface and do not touch the case. |
 | Taps do not click | Go to Settings > Teach Tap. Do this again if you change how you hold the case. |
+| A back tap clicks, or a front tap right-clicks | Go to Settings > Teach Tap. The back is the opposite of the direction it learns. |
+| Pages scroll when you only meant to point | Turn off twist to scroll in Settings, and include the `scroll` lines from the session log when you report it. |
+| Double-clicks feel slow | Turn off drag lock in Settings. |
 
 ## How it works
 
@@ -183,7 +214,15 @@ flowchart LR
 4. **Point:** `Orientation.js` calculates the case's orientation and converts it to
    a screen position.
 5. **Click:** `ClosedCaseTap` looks for a sudden movement in the direction of a tap.
-   If it finds one, the app clicks and plays a short sound on the Mac.
+   If it finds one, the app clicks and plays a short sound on the Mac. A second
+   detector looks for the opposite push, a tap on the back, and right-clicks. The case
+   rocks back after every tap, so a push from the other side within 0.35 seconds is
+   ignored. `DragLock` turns three quick taps into a held button.
+6. **Scroll:** `TwistScroll` measures the turn about the pointing direction from a
+   resting twist that follows your grip. A scroll starts only when the case turns at
+   least 8° within 0.3 seconds, much more than the aim moves, and reaches 20° from
+   that rest. It stops within 12°. Sweeping the pointer rolls the wrist too, but the
+   aim moves more than the twist, so it does not scroll.
 
 If motion stops for less than two seconds, the pointer stops and then continues.
 If motion stops for longer, the pointer pauses and continues when motion returns.
@@ -194,7 +233,8 @@ If motion stops for longer, the pointer pauses and continues when motion returns
 Sources/
   AirPointer/          The app
     App/               Startup, the link to the windows, and the shortcut
-    Session/           The session, motion math, taps, audio guard, cursor size
+    Session/           The session, motion math, taps, drag lock, scrolling, audio
+                       guard, cursor size
     Interface/         The window, menu bar, notch, setup and Tap Test
     Checks/            Window and pose checks; other checks sit beside their code
   ClosedCaseMotion/    The helper, with native H2 and system H1 motion inputs
@@ -234,6 +274,8 @@ In a session's `native.log`:
 - `STEP` lines show the time of each connection step.
 - `HOLD` lines show the motion count so far and its delay, about once a second.
 - `tap` lines explain each tap.
+- `drag` lines show each pick-up and drop.
+- `scroll` lines show why each scroll started, and why a twist did not scroll.
 - The `EXIT` line shows why the session ended.
 
 </details>

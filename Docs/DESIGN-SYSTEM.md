@@ -26,10 +26,13 @@ Every image, animation and instruction must match this. Nothing else.
 | Turn | Turns the closed case a quarter turn **clockwise**, so it stands upright with the lid edge on the right. | The closed case rotating 90° clockwise in place. |
 | Point | Aims the upright closed case at the screen. | The upright closed case (the logo pose). |
 | Click | Taps the **front** of the upright closed case: one tap left-clicks, with one short click sound from the Mac. | The upright closed case, with "Tap its front to click." |
+| Slides | In a slideshow, taps the front once for the next slide, twice quickly for the previous one. Same click sound. | No picture of its own; the Click picture stands. |
 
 Never show or describe tapping the back of the case, holding the open case upright, or "keep the lid open", except in the Connect step.
 
-**There are no modes.** The closed case is the only pointer, from its motion and taps alone. A single tap on its front left-clicks whenever the pointer is pointing; there is no double click and no setting for tapping itself, and Pause or fn ⌃ stops tapping along with the cursor. There are no swipes. Never mention the microphone in the product. The only sounds are the tap’s click and the notch’s shimmer (below).
+**There are no modes.** The closed case is the only pointer, from its motion and taps alone. A single tap on its front left-clicks whenever the pointer is pointing; there is no double click and no setting for tapping itself, and Pause or fn ⌃ stops tapping along with the cursor.
+
+**Slideshows are the one exception, and it is automatic.** While Keynote or PowerPoint shows a slideshow in front, a tap moves to the next slide (→) and two quick taps, within 0.4 s, go back one (←), instead of clicking. A lone tap waits those 0.4 s before the slide changes; only slideshows pay that wait. There is still no setting and no mode to choose: anywhere else a tap clicks, and the cursor keeps moving as a pointer over the slides. Why: a click advances most slideshows but cannot go back, and a presenter needs both. There are no swipes. Never mention the microphone in the product. The only sounds are the tap’s click and the notch’s shimmer (below).
 
 ## 3. Surfaces
 

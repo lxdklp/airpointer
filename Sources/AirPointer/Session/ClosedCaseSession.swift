@@ -16,10 +16,11 @@ struct ClosedCasePointerFilter{
         guard dt>0 else{return filtered}
         if dt>0.25{self=ClosedCasePointerFilter();return feed(point,at:stamp)}
         func alpha(_ cutoff:Double)->Double{dt/(dt+1/(2 * .pi * cutoff))}
-        let derivativeAlpha=alpha(3)
+        let derivativeAlpha=alpha(1.5)
         velocity.x+=derivativeAlpha*((point.x-previous.x)/dt-velocity.x)
         velocity.y+=derivativeAlpha*((point.y-previous.y)/dt-velocity.y)
-        let cutoff=min(25,3.5+8*hypot(velocity.x,velocity.y)),a=alpha(cutoff)
+        let speed=max(0,hypot(velocity.x,velocity.y)-0.03)
+        let cutoff=min(20,0.9+10*speed+18*speed*speed),a=alpha(cutoff)
         let next=CGPoint(x:filtered.x+a*(point.x-filtered.x),y:filtered.y+a*(point.y-filtered.y))
         self.previous=point;self.filtered=next;self.time=stamp;return next
     }
@@ -59,7 +60,7 @@ final class TapClickSound {
     // A running engine starts a sound at once, where AVAudioPlayer holds its caller about 30 ms every time. Its queue keeps
     // Core Audio off the pointer's main run loop. It only ever uses the output: touching its input would open a microphone.
     private let engine=AVAudioEngine(),node=AVAudioPlayerNode(),queue=DispatchQueue(label:"airpointer.click-sound",qos:.userInteractive)
-    private let buffer:AVAudioPCMBuffer?
+    private var buffer:AVAudioPCMBuffer?
     var loaded:Bool{buffer != nil}
     private init(){
         buffer=Bundle.main.url(forResource:"TapClick",withExtension:"wav").flatMap{url in
@@ -68,12 +69,26 @@ final class TapClickSound {
                   (try? file.read(into:buffer)) != nil else{return nil}
             return buffer
         }
-        if let buffer{engine.attach(node);engine.connect(node,to:engine.mainMixerNode,format:buffer.format)}
+        if let buffer{
+            engine.attach(node)
+            // 旧 SDK 不包含 macOS 27 的符号, 需同时检查编译环境和运行时版本.
+            #if AIRPOINTER_MACOS27_SDK
+            if #available(macOS 27,*){if (try? engine.connectNode(node,to:engine.mainMixerNode,format:buffer.format)) == nil{engine.detach(node);self.buffer=nil}}
+            else{engine.connect(node,to:engine.mainMixerNode,format:buffer.format)}
+            #else
+            engine.connect(node,to:engine.mainMixerNode,format:buffer.format)
+            #endif
+        }
     }
     // A change of output stops the engine, so anything that needs it brings it back.
     private func run(){
         guard buffer != nil,!engine.isRunning else{return}
-        if (try? engine.start()) != nil{node.play()}
+        guard (try? engine.start()) != nil else{return}
+        #if AIRPOINTER_MACOS27_SDK
+        if #available(macOS 27,*){try? node.playAudio()}else{node.play()}
+        #else
+        node.play()
+        #endif
     }
     func start(){queue.async{self.run()}}
     func stop(){queue.async{self.node.stop();self.engine.stop()}}
@@ -193,7 +208,7 @@ final class ClosedCaseMotion {
         for(const row of rawRows)rawFusion.feed(row);
         ({ready:rawFusion.ready,generation:rawFusion.generation,measured:rawFusion.measured,
           gyro:rawFusion.last[12] || {},accel:rawFusion.last[11] || {},g:rawFusion.accel&&rawFusion.accel.vector,
-          point:rawGrip.point(rawFusion.q),q:rawFusion.q,edges:rawGrip.edges!==null})
+          point:rawGrip.point(rawFusion.q),twist:rawGrip.twist(rawFusion.q),q:rawFusion.q,edges:rawGrip.edges!==null})
         """)?.toDictionary() as? [String:Any]
     }
 }
@@ -306,6 +321,9 @@ func runClosedCaseNativeChecks() throws {
     guard closedCaseLidOpen(frame(0x24,0x11),productID:0x2027)==true,closedCaseLidOpen(frame(0x62,0x32),productID:0x2027)==true,
           closedCaseLidOpen(frame(0x24,0x19),productID:0x2027)==false,closedCaseLidOpen(frame(0x02,0x11),productID:0x2027)==nil,
           closedCaseLidOpen(frame(0x24,0x11,model:[0x14,0x20]),productID:0x2027)==nil,closedCaseLidOpen(frame(0x24,0x11,model:[0x14,0x20]),productID:0x2014)==true,
+          closedCaseLidOpen(frame(0x24,0x19,model:[0x24,0x20]),productID:0x2024)==false,closedCaseLidOpen(frame(0x24,0x11,model:[0x24,0x20]),productID:0x2014)==nil,
+          closedCaseLidOpen(frame(0x24,0x11,model:[0x19,0x20]),productID:0x2019)==true,closedCaseLidOpen(frame(0x24,0x19,model:[0x19,0x20]),productID:0x2019)==false,
+          closedCaseLidOpen(frame(0x24,0x11,model:[0x1B,0x20]),productID:0x201B)==true,closedCaseLidOpen(frame(0x24,0x11,model:[0x1B,0x20]),productID:0x2019)==nil,
           closedCaseLidOpen(frame(0x24,0x11,length:27),productID:0x2027)==nil else{
         throw LessonError.message("The lid broadcast must be read only for this model with an earbud in the case.")
     }
@@ -331,6 +349,19 @@ func runClosedCaseNativeChecks() throws {
           survey.pairs.map(\.address)==["0A:1B:2C:3D:4E:5F","0A:1B:2C:3D:4E:62"],survey.pairs.map(\.connected)==[true,false],
           survey.pairs[1].title=="Spare AirPods Pro · AirPods Pro 2" else{
         throw LessonError.message("Paired AirPods must be found by vendor and product ID, not by name.")
+    }
+    // AirPods 4 and AirPods 4 ANC are the same H2 platform with different product IDs.
+    let airPods4Listing:[String:Any]=["SPBluetoothDataType":[[
+        "controller_properties":["controller_state":"attrib_on"],
+        "device_connected":[["Test AirPods 4":["device_vendorID":"0x004C","device_productID":"0x2019","device_address":"0A:1B:2C:3D:4E:70"]]],
+        "device_not_connected":[["Test AirPods 4 ANC":["device_vendorID":"0x004C","device_productID":"0x201B","device_address":"0A:1B:2C:3D:4E:71"]]]]]]
+    guard let airPods4=ClosedCaseAirPods.parse(try JSONSerialization.data(withJSONObject:airPods4Listing)),
+          airPods4.pairs.map(\.address)==["0A:1B:2C:3D:4E:70","0A:1B:2C:3D:4E:71"],
+          airPods4.pairs.map(\.model)==["AirPods 4","AirPods 4 ANC"],airPods4.pairs.map(\.connected)==[true,false],
+          airPods4.pairs.map(\.productID)==[0x2019,0x201B],
+          ClosedCaseAirPods.choose(airPods4,saved:nil) == .chosen(airPods4.pairs[0]),
+          ClosedCaseAirPods.choose(airPods4,saved:"0A:1B:2C:3D:4E:71") == .chosen(airPods4.pairs[1]) else{
+        throw LessonError.message("AirPods 4 and AirPods 4 ANC must be found by their product IDs.")
     }
     let bothConnected=ClosedCaseAirPods.Survey(poweredOn:true,pairs:survey.pairs.map{ClosedCaseAirPods(name:$0.name,model:$0.model,address:$0.address,connected:true,productID:$0.productID)})
     let h1Listing:[String:Any]=["SPBluetoothDataType":[["device_connected":[["Renamed earbuds":["device_vendorID":"0x004C","device_productID":"0x200E","device_address":"0A:1B:2C:3D:4E:64"]]]]]]
@@ -439,12 +470,14 @@ func runClosedCaseNativeChecks() throws {
     dropped.evaluateScript("""
     var saved={right:[0.3,0,0],up:[0,0.3,0],gravity:[0,0,1],target_sha256:'x'},grip=new Grip(saved);
     var edges={kept:grip.recenter([1,0,0,0],[0,0,1]),center:grip.point([1,0,0,0]),right:grip.point([Math.cos(.075),Math.sin(.075),0,0]),
+      beyondRight:grip.point([Math.cos(.3),Math.sin(.3),0,0]),
       parallel:new Grip({right:[0.3,0,0],up:[0.3,0.01,0],gravity:[0,0,1]}).edges===null,
       turned:new Grip(saved).recenter([Math.SQRT1_2,Math.SQRT1_2,0,0],[0,0,1]),fresh:new Grip().edges===null};
     """)
     let edges=dropped.evaluateScript("edges")?.toDictionary() as? [String:Any]
     func near(_ value:Any?,_ expected:[Double])->Bool{(value as? [Double]).map{zip($0,expected).allSatisfy{abs($0-$1)<1e-6} && $0.count==2} ?? false}
     guard dropped.exception==nil,edges?["kept"] as? Bool==true,near(edges?["center"],[0.5,0.5]),near(edges?["right"],[0.75,0.5]),
+          near(edges?["beyondRight"],[1.5,0.5]),
           edges?["parallel"] as? Bool==true,edges?["turned"] as? Bool==false,edges?["fresh"] as? Bool==true else{
         throw LessonError.message("Saved grip edges must recenter with one pose and refuse a different hold.")
     }
@@ -477,7 +510,7 @@ func runClosedCaseNativeChecks() throws {
           !closedCaseUpright([0,0,1],closed:[0,0,1],held:[1,0,0]) else{
         throw LessonError.message("Upright must follow a quarter turn from the closed pose or the pose of the saved edges.")
     }
-    print("PASS: AirPods found by product ID with a plain reason for each failure, motion code in JavaScriptCore, known angular motion, a saved offset in any pose, a hand-held first offset, gentle re-measuring, upright from a quarter turn, bridge types and raw array conversion; no device or cursor operations, bounded helper log and newest-session pruning, the lid from paired in-case reports and from the lid broadcast, short-drop hold, long-drop restart and saved grip edges")
+    print("PASS: AirPods found by product ID, including AirPods 4 and AirPods 4 ANC, with a plain reason for each failure, motion code in JavaScriptCore, known angular motion, a saved offset in any pose, a hand-held first offset, gentle re-measuring, upright from a quarter turn, bridge types and raw array conversion; no device or cursor operations, bounded helper log and newest-session pruning, the lid from paired in-case reports and from the lid broadcast for Pro 2, Pro 3 and AirPods 4, short-drop hold, long-drop restart and saved grip edges")
 }
 
 enum ClosedCaseStage:Equatable{case off,openLid,connecting,closeLid,settling,holding,calibrating,ready,pointing}
@@ -507,10 +540,17 @@ final class ClosedCaseSession: NSObject {
     func learnTaps(_ handler:@escaping(ClosedCaseTapLearner.Event)->Void){tapLearner=ClosedCaseTapLearner(lowSampleRate:usesHeadphoneMotion);onTapLearning=handler}
     func stopLearningTaps(){tapLearner=nil;onTapLearning=nil}
     var tapDirection:[Double]?{didSet{refreshTapDirection()}}
-    func refreshTapDirection(){tapDetector.direction=HeadphoneTapCalibration.direction(h2:tapDirection,headphone:usesHeadphoneMotion)}
+    func refreshTapDirection(){
+        tapDetector.direction=HeadphoneTapCalibration.direction(h2:tapDirection,headphone:usesHeadphoneMotion)
+        backTapDetector.direction = -tapDetector.direction
+    }
     var onEnded:((String?)->Void)?
     var opensLidFirst=false
-    private(set) var usesHeadphoneMotion=false{didSet{tapDetector.lowSampleRate=usesHeadphoneMotion;refreshTapDirection()}}
+    private(set) var usesHeadphoneMotion=false{didSet{
+        tapDetector.lowSampleRate=usesHeadphoneMotion
+        backTapDetector.lowSampleRate=usesHeadphoneMotion
+        refreshTapDirection()
+    }}
     private(set) var lostContact=false
     var isActive:Bool{preparing || helper?.isRunning == true  ||  bootstrap?.isRunning == true}
     var inputReady:Bool{connected && ProcessInfo.processInfo.systemUptime-lastHost<0.5}
@@ -558,7 +598,15 @@ final class ClosedCaseSession: NSObject {
     private var readStats=(count:0,total:0.0,longest:0.0,since:0.0)
     private var tapDetector=ClosedCaseTapDetector(),recentPoints:[(t:Double,point:CGPoint)]=[],tapHold:CGPoint?
     private var headphoneTapInput=HeadphoneTapInput()
-    private var lastClick:(uptime:Double,position:CGPoint,count:Int64)?
+    private var dragLock=ClosedCaseDragLock()
+    // A tap on the back pushes the sensor the opposite way and right-clicks. The case rocks back after any tap,
+    // so a tap from the other side within echoGap of an accepted one is ignored. (After musubipapi/airpointer#12.)
+    private var backTapDetector:ClosedCaseTapDetector={var d=ClosedCaseTapDetector();d.direction = -ClosedCaseTapDetector.tapDirection;return d}()
+    private var lastAcceptedTap:(t:Double,back:Bool)?,heldByBack=false
+    private static let echoGap=0.35
+    private var twistScroll=ClosedCaseTwistScroll(),scrollHold:CGPoint?,scrollCarry=0.0,lastScrollTick=0.0
+    // In a slideshow a front tap waits briefly for a second one (SlideControl.swift).
+    private var slideGate=SlideTapGate()
     private var closedAt=0.0,startedAt=0.0,helperStartedAt=0.0,stoppedAt=0.0,busyRetries=0
     private var activity:NSObjectProtocol?
     private var savedMeasure=0,lastCalibrationSave=0.0
@@ -576,6 +624,9 @@ final class ClosedCaseSession: NSObject {
     private let bluetooth=ClosedCaseBluetoothAccess()
     private var resumeAfterDrop=false
     var speed=1.0,clickSound=true
+    var dragLockOn:Bool{get{dragLock.enabled}set{dragLock.enabled=newValue}}
+    var backTapOn=true,twistScrollOn=true
+    var scrollReverse:Bool{get{twistScroll.reverse}set{twistScroll.reverse=newValue}}
     var pointsWhenReady=false,usesNotch=false
     var centersItself:Bool{pointsWhenReady && centerOnly}
     var preparingConnection:Bool{preparing && lidWatcher==nil}
@@ -629,7 +680,8 @@ final class ClosedCaseSession: NSObject {
     func resumeCursor(){toggleCursor()}
     func recenter(){if calibrated && inputReady{let resume=enabled;setPose();if resume{toggleCursor()}}else{changed()}}
     func recalibrate(){pause();hasPointed=false;calibrated=false;motion?.resetGrip();changed()}
-    func pause(_ reason:String="Paused"){pauseReason=reason;enabled=false;resumeAfterDrop=false;changed()}
+    // Every way the pointer stops comes through here, so a held drag is always let go.
+    func pause(_ reason:String="Paused"){releaseDrag();for event in twistScroll.reset(){noteScroll(event,at:0)};pauseReason=reason;enabled=false;resumeAfterDrop=false;slideGate.cancel();changed()}
     func disconnect(then done:(()->Void)?=nil){
         if let done{if isActive{afterEnd.append(done)}else{done();return}}
         userEnded=true;stop()
@@ -800,6 +852,8 @@ final class ClosedCaseSession: NSObject {
         if stopping && stoppedAt>0 && now-stoppedAt>3{if !signalled{signalled=true;helper?.terminate()};return}
         if now-lastStatus>0.2{lastStatus=now;readStatus()}
         if !stopping && helper?.isRunning == true{readMotion()}
+        if enabled{perform(dragLock.tick(now:now))}
+        postScroll(now)
         if enabled && closedCaseShouldPause(motionAge:now-lastHost){
             pause("Lost the case’s motion. Pointing resumes when it’s back.");resumeAfterDrop=true
         }
@@ -857,6 +911,8 @@ final class ClosedCaseSession: NSObject {
             defer{noteRead(from:readAt)}
             let tapRows=usesHeadphoneMotion ? headphoneTapInput.feed(rows):rows
             let tapEvents=tapLearner==nil && enabled && calibrated ? tapDetector.feed(tapRows):tapDetector.reset()
+            let backEvents=tapLearner==nil && tapTest==nil && enabled && calibrated && backTapOn ? backTapDetector.feed(tapRows):backTapDetector.reset()
+            backTapDetector.ignored=[]
             for event in tapLearner?.feed(tapRows) ?? []{
                 if case .tap=event,clickSound{TapClickSound.shared.play()}
                 try? log?.write(contentsOf:Data("TAPLEARN \(event)\n".utf8))
@@ -865,19 +921,32 @@ final class ClosedCaseSession: NSObject {
             }
             for note in tapDetector.ignored{try? log?.write(contentsOf:Data("tap: \(note)\n".utf8));tapTest?(.rejected(note))}
             tapDetector.ignored=[]
+            // A lone slideshow tap whose wait for a second one is over moves to the next slide.
+            if let key=slideGate.poll(at:ProcessInfo.processInfo.systemUptime),enabled{postSlide(key)}
             // Ahead of the orientation code, which can take tens of milliseconds now and then.
-            for event in tapEvents{
+            // Releases first, then taps in the order they began; each detector lets go only of its own hold.
+            func began(_ event:ClosedCaseTapDetector.Event)->Double{if case .tap(let since,_,_)=event{return since};return -.infinity}
+            for (event,back) in (tapEvents.map{($0,false)}+backEvents.map{($0,true)}).sorted(by:{began($0.0)<began($1.0)}){
                 switch event {
-                case .release:tapHold=nil
+                case .release:if heldByBack==back{tapHold=nil}
                 case .tap(let since,let jolt,let repeated):
-                    let at=recentPoints.last{$0.t<since}?.point ?? smooth;tapHold=at
-                    if enabled{
+                    if let last=lastAcceptedTap,last.back != back,since-last.t<Self.echoGap{
+                        try? log?.write(contentsOf:Data(String(format:"tap: ignored %@ tap at %.2f, the case rocking back after the %@ tap\n",back ? "back":"front",since,last.back ? "back":"front").utf8))
+                        continue
+                    }
+                    lastAcceptedTap=(since,back)
+                    let at=recentPoints.last{$0.t<since}?.point ?? smooth;tapHold=at;heldByBack=back
+                    if enabled,tapTest==nil,!back,SlideShow.frontmostIsShowing(){
+                        if let key=slideGate.tap(at:ProcessInfo.processInfo.systemUptime){postSlide(key)}
+                        if clickSound{TapClickSound.shared.play()}
+                        try? log?.write(contentsOf:Data(String(format:"tap: slideshow tap at %.2f, jolt %.2f g%@\n",since,jolt,repeated ? ", repeat":"").utf8))
+                    }else if enabled{
                         let decided=ProcessInfo.processInfo.systemUptime
-                        if let tapTest{tapTest(.click)}else{postClick(at)}
+                        if let tapTest{tapTest(.click)}else if back{rightClick(at)}else{handleTap(at)}
                         let clicked=ProcessInfo.processInfo.systemUptime
                         if clickSound{TapClickSound.shared.play()}
                         let sounded=ProcessInfo.processInfo.systemUptime
-                        try? log?.write(contentsOf:Data(String(format:"tap: click at %.2f, jolt %.2f g, %.0f ms after it began%@, %.0f ms after arrival, %.1f ms reading, %.1f ms posting, %.1f ms sound\n",since,jolt,1e3*((rows.last?[2] ?? 0)*1e-6-since),repeated ? ", repeat":"",1e3*(decided-(rows.last?[3] ?? decided)),1e3*(decided-readAt),1e3*(clicked-decided),1e3*(sounded-clicked)).utf8))
+                        try? log?.write(contentsOf:Data(String(format:"tap: %@click at %.2f, jolt %.2f g, %.0f ms after it began%@, %.0f ms after arrival, %.1f ms reading, %.1f ms posting, %.1f ms sound\n",back ? "right-":"",since,jolt,1e3*((rows.last?[2] ?? 0)*1e-6-since),repeated ? ", repeat":"",1e3*(decided-(rows.last?[3] ?? decided)),1e3*(decided-readAt),1e3*(clicked-decided),1e3*(sounded-clicked)).utf8))
                     }
                 }
             }
@@ -919,7 +988,11 @@ final class ClosedCaseSession: NSObject {
             }
             guard calibrated,let point=result["point"] as? [Double],point.count==2,point.allSatisfy(\.isFinite) else{return}
             let x=0.5+(point[0]-0.5)*speed,y=0.5+(point[1]-0.5)*speed
-            if let tapHold{smooth=tapHold}else{
+            if let twist=result["twist"] as? [Double],twist.count==4,twist.allSatisfy(\.isFinite){
+                let blocked = !enabled || !twistScrollOn || tapHold != nil || dragLock.dragging
+                for event in twistScroll.feed(t:stamp*1e-6,twist:twist[0],swing:SIMD3(twist[1],twist[2],twist[3]),blocked:blocked){noteScroll(event,at:stamp*1e-6)}
+            }
+            if let tapHold{smooth=tapHold}else if let scrollHold{smooth=scrollHold}else{
                 smooth=pointerFilter.feed(CGPoint(x:min(1,max(0,x)),y:min(1,max(0,y))),at:stamp*1e-6)
                 recentPoints.append((stamp*1e-6,smooth));while let first=recentPoints.first,stamp*1e-6-first.t>0.5{recentPoints.removeFirst()}
             }
@@ -963,17 +1036,69 @@ final class ClosedCaseSession: NSObject {
     }
     private func postCursor(){
         guard let bounds=pointerBounds(),
-              let event=CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:screenPoint(smooth,bounds:bounds),mouseButton:.left) else{pause();return}
+              let event=CGEvent(mouseEventSource:nil,mouseType:dragLock.dragging ? .leftMouseDragged:.mouseMoved,mouseCursorPosition:screenPoint(smooth,bounds:bounds),mouseButton:.left) else{pause();return}
         event.post(tap:.cghidEventTap)
     }
-    private func postClick(_ point:CGPoint){
+    private func postSlide(_ key:SlideKey){
+        guard AXIsProcessTrusted() else{pause();return}
+        SlideShow.post(key)
+        try? log?.write(contentsOf:Data("tap: \(key == .next ? "next":"previous") slide\n".utf8))
+    }
+    private func handleTap(_ point:CGPoint){
         guard let bounds=pointerBounds() else{pause();return}
-        let position=screenPoint(point,bounds:bounds),now=ProcessInfo.processInfo.systemUptime
-        let count=lastClick.map{now-$0.uptime<NSEvent.doubleClickInterval && hypot($0.position.x-position.x,$0.position.y-position.y)<8 ? $0.count+1:1} ?? 1
-        guard let down=CGEvent(mouseEventSource:nil,mouseType:.leftMouseDown,mouseCursorPosition:position,mouseButton:.left),
-              let up=CGEvent(mouseEventSource:nil,mouseType:.leftMouseUp,mouseCursorPosition:position,mouseButton:.left) else{return}
-        down.setIntegerValueField(.mouseEventClickState,value:count);up.setIntegerValueField(.mouseEventClickState,value:count)
-        down.post(tap:.cghidEventTap);up.post(tap:.cghidEventTap);lastClick=(now,position,count)
+        perform(dragLock.tap(at:screenPoint(point,bounds:bounds),now:ProcessInfo.processInfo.systemUptime,interval:NSEvent.doubleClickInterval))
+    }
+    private func perform(_ actions:[ClosedCaseDragLock.Action]){
+        for action in actions{
+            switch action {
+            case .click(let position,let count):
+                postButton(.leftMouseDown,at:position,count:count);postButton(.leftMouseUp,at:position,count:count)
+            case .grab(let position):
+                postButton(.leftMouseDown,at:position,count:1)
+                try? log?.write(contentsOf:Data(String(format:"drag: picked up at %.0f,%.0f\n",position.x,position.y).utf8))
+            case .drop(let position):
+                postButton(.leftMouseUp,at:position,count:1)
+                try? log?.write(contentsOf:Data(String(format:"drag: dropped at %.0f,%.0f\n",position.x,position.y).utf8))
+            }
+        }
+    }
+    private func postButton(_ type:CGEventType,at position:CGPoint,count:Int64,button:CGMouseButton = .left){
+        guard let event=CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:position,mouseButton:button) else{return}
+        event.setIntegerValueField(.mouseEventClickState,value:count);event.post(tap:.cghidEventTap)
+    }
+    private func rightClick(_ point:CGPoint){
+        guard !dragLock.dragging else{try? log?.write(contentsOf:Data("tap: back tap ignored while dragging\n".utf8));return}
+        guard let bounds=pointerBounds() else{pause();return}
+        perform(dragLock.interrupt())
+        let position=screenPoint(point,bounds:bounds)
+        postButton(.rightMouseDown,at:position,count:1,button:.right);postButton(.rightMouseUp,at:position,count:1,button:.right)
+    }
+    // While a twist scrolls, the pointer stays where it was just before the twist began.
+    private func noteScroll(_ event:ClosedCaseTwistScroll.Event,at t:Double){
+        switch event {
+        case .started(let twist,let baseline,let twistIn,let aimIn):
+            scrollHold=recentPoints.last{$0.t<t-ClosedCaseTwistScroll.window}?.point ?? smooth;scrollCarry=0
+            try? log?.write(contentsOf:Data(String(format:"scroll: started at %.0f° twist, baseline %.0f°, %.0f° of twist and %.0f° of aim in %.1f s\n",twist,baseline,twistIn,aimIn,ClosedCaseTwistScroll.window).utf8))
+        case .ended:
+            scrollHold=nil;scrollCarry=0
+            try? log?.write(contentsOf:Data("scroll: ended\n".utf8))
+        case .ignored(let why):
+            try? log?.write(contentsOf:Data("scroll: ignored, \(why)\n".utf8))
+        }
+    }
+    private func postScroll(_ now:Double){
+        let dt=lastScrollTick>0 ? min(0.05,max(0,now-lastScrollTick)):0;lastScrollTick=now
+        guard enabled,twistScroll.scrolling,now-lastHost<0.25 else{scrollCarry=0;return}
+        scrollCarry+=twistScroll.rate*dt
+        let pixels=scrollCarry.rounded(.towardZero)
+        guard abs(pixels)>=1,let event=CGEvent(scrollWheelEvent2Source:nil,units:.pixel,wheelCount:1,wheel1:Int32(pixels),wheel2:0,wheel3:0) else{return}
+        scrollCarry-=pixels;event.post(tap:.cghidEventTap)
+    }
+    // Lets go of a held drag where the cursor is now, so the button is never left down.
+    private func releaseDrag(){
+        guard dragLock.cancel(),let position=CGEvent(source:nil)?.location else{return}
+        postButton(.leftMouseUp,at:position,count:1)
+        try? log?.write(contentsOf:Data("drag: let go because the pointer stopped\n".utf8))
     }
     func stop(){
         silentOutput?.stop();silentOutput=nil;TapClickSound.shared.stop()

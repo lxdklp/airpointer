@@ -9,7 +9,8 @@ import Foundation
 // A firm, exact spike with little turning counts even if the hand wasn't quite still. For a second after a tap the hand
 // hasn't settled, so a spike there only has to come without much rotation.
 // The thresholds come from closed-lid taps held in the hand, closed-lid handling and pointing (Tests/TapFixtures.csv)
-// and from runs of the tap test.
+// and from runs of the tap test. They and the default direction were tuned on AirPods Pro 3. AirPods 4 shares the H2
+// motion stack but has a different case and earbud shape, so Teach Tap and the Tap Test should confirm its taps.
 struct ClosedCaseTapDetector {
     // tap: click where the pointer was before `since` (sensor seconds), and keep it there through the wobble.
     // repeated means it counted only because it came soon after another tap. release: the pointer can move again.

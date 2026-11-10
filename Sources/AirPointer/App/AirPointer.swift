@@ -22,7 +22,7 @@ final class App: NSObject, NSApplicationDelegate {
     var setupTaps=SetupTaps()
     // Set when the person backs out of closed-case calibration, so the dots don't reopen on the next tick.
     var closedCalibrationDeclined=false
-    // Paired AirPods Pro, refreshed when Settings opens.
+    // Paired AirPods, refreshed when Settings opens.
     var closedCasePairs:[ClosedCaseAirPods]=[]
     var timer: Timer?
     var homeMenuItems:[NSMenuItem]=[]
@@ -180,11 +180,14 @@ if CommandLine.arguments.contains("--check-audio-output-policy") {
     selfCheck(screenPoint(.zero, bounds: bounds) == CGPoint(x: -1919, y: 1))
     selfCheck(screenPoint(CGPoint(x: 1, y: 1), bounds: bounds) == CGPoint(x: -1, y: 1079))
     runPoseChecks()
+    runSlideControlChecks()
     do{try runPointerSettingsChecks()}catch{fputs("Pointer settings check failed: \(error.localizedDescription)\n",stderr);exit(1)}
     do{try runClosedCaseStageChecks()}catch{fputs("Closed-case stage check failed: \(error.localizedDescription)\n",stderr);exit(1)}
     do{try runClosedCaseTapChecks(fixtures:nil)}catch{fputs("Closed-case tap check failed: \(error.localizedDescription)\n",stderr);exit(1)}
     do{try runTapTestChecks()}catch{fputs("Tap test check failed: \(error.localizedDescription)\n",stderr);exit(1)}
-    print("PASS: audio output policy, screen mapping, pose math, pointer settings, session stages, closed-case tap detection and the tap test")
+    do{try runDragLockChecks()}catch{fputs("Drag lock check failed: \(error.localizedDescription)\n",stderr);exit(1)}
+    do{try runTwistScrollChecks()}catch{fputs("Twist-to-scroll check failed: \(error.localizedDescription)\n",stderr);exit(1)}
+    print("PASS: audio output policy, screen mapping, pose math, slideshow taps, pointer settings, session stages, closed-case tap detection, the tap test, drag lock and twist-to-scroll")
 } else {
     let app = NSApplication.shared
     let delegate = App()
